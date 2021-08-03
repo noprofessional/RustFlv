@@ -1,12 +1,18 @@
+mod epoller;
+mod http_conn;
+mod my_error;
+
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::env;
-use std::error;
 use std::fmt;
 use std::fs;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
+use epoller::Epoller;
+use http_conn::HttpListener;
+use my_error::my_error;
 
 const FLV_HEADER_LEN: usize = 9;
 const TAG_HEADER_LEN: usize = 11;
@@ -15,13 +21,6 @@ const TAG_HEADER_TIMESTAMP_LEN: usize = 4;
 const TAG_HEADER_STREAM_ID_LEN: usize = 4;
 const PRE_TAG_SIZE_LEN: usize = 4;
 const AVC_PACKET_COMPOSITION_TIME_LEN: usize = 3;
-
-fn my_error<T>(err_str: T) -> Error
-where
-    T: Into<Box<dyn error::Error + Send + Sync>>,
-{
-    Error::new(ErrorKind::Other, err_str)
-}
 
 struct TagHeader {
     data_size: usize,
@@ -960,7 +959,7 @@ fn parse_flv(mut data: &[u8]) -> Result<()> {
         let (rest_data, flv_tag) = FlvTag::parse(data)?;
         data = rest_data;
 
-        println!("[{}]:{}\n", tag_cnt, flv_tag);
+        //println!("[{}]:{}\n", tag_cnt, flv_tag);
 
         let (rest_data, pre_tag_size) = parse_pre_tag_size(data)?;
         data = rest_data;
@@ -982,6 +981,12 @@ fn parse_flv(mut data: &[u8]) -> Result<()> {
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
+    println!("args {:?}", args);
+
+    if args.len() < 2 {
+        return Err(my_error("argument missing! usage: flv-server flv_filename"));
+    }
+
     let filename = &args[1];
 
     let contents = fs::read(filename)?;
@@ -989,6 +994,23 @@ fn main() -> Result<()> {
     parse_flv(&contents)?;
 
     println!("file {} content size:{}", filename, contents.len());
+
+    let running: bool = true;
+
+    let http_listener = HttpListener::bind("192.168.74.3:8848")
+        .or_else(|err| Err(my_error(format!("bind http listener failed with {}", err))))?;
+
+    let mut epoller = Epoller::create()?;
+    if let Err((http_listener, err)) = epoller.wait_read(http_listener) {
+        println!("epoll wait_read for {:?} failed with {}", http_listener, err);
+        // listener will close when dropped
+        return Err(err);
+    }
+
+    while running {
+        println!("test {}", line!());
+        epoller.run(-1)?;
+    }
 
     return Ok(());
 }
